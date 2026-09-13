@@ -32,24 +32,11 @@ $$
 
 - $\hat\beta_p$ is the relative exposure to asset 2.
 - $\hat\beta_m$ is the exposure to the market factor.
-- $R^2$ is the in-sample fraction of variation in $x_t$ explained by the regressors. High $R^2$ does not prove stationarity, cointegration, causality, or profitability.
+- $R^2$ is the in-sample fraction of variation in $x_t$ explained by the regressors. High $R^2$ does not prove stationarity, causality, or profitability.
 
 The regression is directional, so reversing assets 1 and 2 can change the coefficients and signals.
 
-## Statistical eligibility tests
-
-### Engle–Granger cointegration test
-
-The two-series test uses $x_t$ and $y_t$:
-
-$$
-H_0:\text{ the pair is not cointegrated}, \qquad
-H_1:\text{ the pair is cointegrated}.
-$$
-
-The default rule `coint_pvalue <= 0.05` rejects the null. This is evidence against no cointegration under the test assumptions; it is not a 95 percent probability that the pair is cointegrated.
-
-### Augmented Dickey–Fuller test
+## Residual stationarity test
 
 This test is applied to the market-adjusted residual:
 
@@ -59,8 +46,6 @@ H_1:\text{ the residual is stationary}.
 $$
 
 The default rule `adf_pvalue <= 0.05` rejects the unit-root null. A low p-value supports stationarity inside that window but does not show that the relationship will continue.
-
-The two p-values answer different questions: cointegration is tested on the pair alone, while residual stationarity is tested after controlling for the market factor.
 
 ## Mean-reversion speed
 
@@ -77,6 +62,16 @@ h=-\frac{\ln 2}{\hat\lambda}.
 $$
 
 This estimates the trading periods needed for a deviation to decay by half. A non-negative or near-zero reversion speed produces an infinite or unstable half-life.
+
+## Hedge-ratio stability
+
+The diagnostic analyzer refits the regression over fixed-length rolling windows. For each hedge coefficient it calculates
+
+$$
+S_\beta=\frac{\operatorname{sd}(\hat\beta_t)}{|\operatorname{mean}(\hat\beta_t)|}.
+$$
+
+Lower values mean greater relative stability. The code describes values below `0.25` as stable, `0.25` to below `0.50` as somewhat stable, and at least `0.50` as unstable. A near-zero mean produces an infinite ratio. Pair-beta and market-beta stability are evaluated separately.
 
 ## Standardized signal
 
@@ -120,9 +115,17 @@ For signal date $t$:
 
 This prevents direct look-ahead bias. It does not model intraday execution or guarantee a fill at the recorded close. During a trade, the entry model can remain frozen for the mean-reversion exit while a fresh model monitors relationship deterioration.
 
+The training set covers a trailing number of calendar years but must contain the configured minimum number of observations. The final available price date cannot be a signal date because no later close exists for execution.
+
+## Analyzer workflows
+
+`PairTradingAnalyzer` produces the latest model diagnostics, rolling-beta analysis, plots, and current signal. `run_daily_walk_forward_backtest_from_prices` performs the historical simulation. `analyze_pair_strategy_from_prices` runs both and joins their outputs into one screener summary.
+
+The current diagnostic and backtest are therefore separate calculations. The latest analysis uses the previous available date as its training end, while every backtest day creates its own prior-data-only window.
+
 ## Entry and exit rules
 
-Entry requires the z-score threshold and all enabled tests. It is blocked when cointegration, residual stationarity, fit, or half-life requirements fail.
+Entry requires the z-score threshold and all enabled tests. In the current code, filters are checked in this order: pair-only cointegration, residual stationarity, minimum $R^2$, and finite positive half-life when the holding rule is enabled. The daily output records the first failed rule.
 
 A position closes on the first applicable event:
 
@@ -133,6 +136,56 @@ A position closes on the first applicable event:
 - mean reversion to the exit z-score.
 
 No same-close reversal is allowed.
+
+### Saved versus refitted model
+
+With `use_saved_model_during_trade=True`, the entry model is frozen for the z-score used to decide mean reversion. A fresh daily model still monitors relationship failure. With the option disabled, the latest rolling model also controls the mean-reversion decision.
+
+The maximum holding period is fixed when a trade opens:
+
+$$
+H=\max(1,\lceil k h_{entry}\rceil).
+$$
+
+### Relationship-break calculation
+
+The strategy can exit when live $R^2$ falls below its floor or when either beta changes too far from its entry value. Relative beta change is
+
+$$
+D_\beta=\frac{|\hat\beta_{live}-\hat\beta_{entry}|}{\max(|\hat\beta_{entry}|,0.10)}.
+$$
+
+The denominator floor prevents a very small entry beta from producing a mechanically enormous ratio.
+
+### Return and weight evolution
+
+Daily portfolio return uses weights held before that day's price movement:
+
+$$
+r_{p,t}=\mathbf w_{t-1}^{\mathsf T}\mathbf r_t.
+$$
+
+Without daily rebalancing, weights drift according to
+
+$$
+w_{i,t}=w_{i,t-1}\frac{1+r_{i,t}}{1+r_{p,t}}.
+$$
+
+With rebalancing, target weights are restored and costs are charged. The simulation tracks gross equity before costs and net equity after costs separately.
+
+### Transaction costs
+
+For weight change $\Delta\mathbf w=\mathbf w_{new}-\mathbf w_{old}$,
+
+$$
+C_t=c_b\sum_i(\Delta w_i)^+ + c_s\sum_i(-\Delta w_i)^+.
+$$
+
+The monetary cost equals current equity multiplied by $C_t$. Costs apply at entry, exit, and optional rebalancing. This omits nonlinear impact, borrowing, funding, taxes, and failed execution.
+
+### Exact exit priority
+
+The first applicable rule wins: final date, stop loss, maximum holding period, low live $R^2$, excessive pair-beta change, excessive market-beta change, then mean reversion.
 
 ## Interpreting the outputs
 
@@ -152,6 +205,38 @@ No same-close reversal is allowed.
 
 No result is meaningful without its sample dates, trade count, turnover, costs, and out-of-sample status. A high Sharpe ratio from five selected trades is weak evidence.
 
+The Sharpe ratio uses mean daily net return divided by sample daily volatility, multiplied by $\sqrt{252}$, with a zero risk-free rate. Profit factor is total positive completed-trade return divided by the absolute total negative completed-trade return. It can be infinite or unstable when very few losses occur.
+
+Daily records include live diagnostics, signal and decision z-scores, entry blocks, positions, drifting weights, returns, turnover, costs, and equity. Trade records include entry parameters, weights, costs, holding periods, returns, and exit reasons.
+
+## `good_pair` and quality score
+
+`good_pair=True` requires the enabled pair-only threshold, residual stationarity threshold, half-life range, pair-beta stability, market-beta stability, and minimum $R^2$. It does not require a current signal and does not use return, Sharpe ratio, win rate, or drawdown. It means the latest model passed structural filters—not that the strategy is profitable.
+
+The quality score is a fixed heuristic from 0 to 100:
+
+| Component | Maximum points | Code behavior |
+| --- | ---: | --- |
+| Pair-only p-value | 25 | Linear improvement from threshold to zero |
+| Residual stationarity p-value | 25 | Linear improvement from threshold to zero |
+| $R^2$ | 15 | `15 × R²`, clipped to 0–15 |
+| Pair-beta stability | 10 | Linear improvement from limit to zero |
+| Market-beta stability | 10 | Linear improvement from limit to zero |
+| Half-life | 10 | All points when inside range |
+| Current absolute z-score | 5 | All points when entry threshold is reached |
+
+This score is not a probability, expected return, or statistically calibrated measure.
+
+## Current-signal meaning
+
+The signal function returns `NO DATA` for a non-finite z-score and `NO TRADE` below the entry threshold. Otherwise it reports normalized long and short legs. A displayed trade direction means the z-score threshold was reached; it does not by itself guarantee that all `good_pair` filters passed.
+
+## Legacy pair-only filter
+
+The analyzer still calculates a pair-only cointegration p-value from the two asset log-price series. It can block daily entries, contributes to `good_pair`, and supplies 25 quality-score points. The actual tradable object is instead the three-leg market-adjusted residual.
+
+This legacy filter is overlapping evidence, not an independent test of the tradable residual. It can be disabled by setting `coint_threshold=None`. Removing it from the project requires coordinated changes to entry rules, summary fields, scoring, screener output columns, and command-line arguments.
+
 Pairs are sorted using eligibility, Sharpe ratio, quality score, and absolute current signal. If the same period is used for selection and reported performance, the result contains selection bias.
 
 ## Limitations
@@ -160,7 +245,7 @@ Pairs are sorted using eligibility, Sharpe ratio, quality score, and absolute cu
 - **Survivorship bias:** current S&P 500 members are not the historical member set.
 - **Data quality:** Yahoo Finance is convenient research data, not execution-grade data.
 - **Parameter uncertainty:** coefficients, half-life, p-values, and thresholds are estimates.
-- **Structural breaks:** cointegration may vanish after changes in firms or market regimes.
+- **Structural breaks:** the estimated spread relationship may vanish after changes in firms or market regimes.
 - **Trading frictions:** borrow availability, bid–ask spread, impact, funding, taxes, and short-sale constraints are incomplete.
 - **Dependence:** overlapping windows and repeated trades weaken independent-observation assumptions.
 - **Model risk:** persistent regressors, heteroskedastic residuals, and nonlinear relationships can violate ordinary least-squares assumptions.
