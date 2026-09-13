@@ -38,6 +38,17 @@ The regression is directional, so reversing assets 1 and 2 can change the coeffi
 
 ## Statistical eligibility tests
 
+### Engle–Granger cointegration test
+
+The two-series test uses $x_t$ and $y_t$:
+
+$$
+H_0:\text{ the pair is not cointegrated}, \qquad
+H_1:\text{ the pair is cointegrated}.
+$$
+
+The default rule `coint_pvalue <= 0.05` rejects the null. This is evidence against no cointegration under the test assumptions; it is not a 95 percent probability that the pair is cointegrated.
+
 ### Augmented Dickey–Fuller test
 
 This test is applied to the market-adjusted residual:
@@ -48,6 +59,8 @@ H_1:\text{ the residual is stationary}.
 $$
 
 The default rule `adf_pvalue <= 0.05` rejects the unit-root null. A low p-value supports stationarity inside that window but does not show that the relationship will continue.
+
+The two p-values answer different questions: cointegration is tested on the pair alone, while residual stationarity is tested after controlling for the market factor.
 
 ## Mean-reversion speed
 
