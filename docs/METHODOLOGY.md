@@ -68,7 +68,9 @@ This estimates the trading periods needed for a deviation to decay by half. A no
 The diagnostic analyzer refits the regression over fixed-length rolling windows. For each hedge coefficient it calculates
 
 $$
-S_\beta=\frac{\operatorname{sd}(\hat\beta_t)}{|\operatorname{mean}(\hat\beta_t)|}.
+S_\beta=
+\frac{\mathrm{SD}(\hat{\beta}_t)}
+{\left|\mathrm{Mean}(\hat{\beta}_t)\right|}.
 $$
 
 Lower values mean greater relative stability. The code describes values below `0.25` as stable, `0.25` to below `0.50` as somewhat stable, and at least `0.50` as unstable. A near-zero mean produces an infinite ratio. Pair-beta and market-beta stability are evaluated separately.
