@@ -5,7 +5,7 @@
 - Name: `quant-pairs-research`
 - Description: `Walk-forward research framework for market-neutral pairs trading across equities and crypto.`
 - Visibility: Public
-- Topics: `quantitative-finance`, `pairs-trading`, `statistical-arbitrage`, `cointegration`, `backtesting`, `python`
+- Topics: `quantitative-finance`, `pairs-trading`, `statistical-arbitrage`, `mean-reversion`, `backtesting`, `python`
 - Website: leave blank unless you later add a dashboard
 
 Do not add another README, license, or `.gitignore` when creating the GitHub repository; this project already contains them.
@@ -32,6 +32,6 @@ git push -u origin main
 
 Suggested resume line:
 
-> Built a walk-forward statistical-arbitrage framework that screens equity and crypto pairs using market-adjusted cointegration, models transaction costs and hedge drift, and applies relationship-break risk controls.
+> Built a walk-forward statistical-arbitrage framework that screens market-adjusted residual spreads for stationarity, models transaction costs and hedge drift, and applies relationship-break risk controls.
 
 Do not claim profitability unless you publish the exact test window, costs, benchmark, and untouched out-of-sample results.

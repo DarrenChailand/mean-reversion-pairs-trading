@@ -36,9 +36,9 @@ $$
 
 The regression is directional, so reversing assets 1 and 2 can change the coefficients and signals.
 
-## Residual stationarity test
+## Augmented Dickey–Fuller (ADF) residual stationarity test
 
-This test is applied to the market-adjusted residual:
+The Augmented Dickey–Fuller (ADF) test is applied to the market-adjusted residual:
 
 $$
 H_0:\text{ the residual has a unit root}, \qquad
@@ -68,9 +68,7 @@ This estimates the trading periods needed for a deviation to decay by half. A no
 The diagnostic analyzer refits the regression over fixed-length rolling windows. For each hedge coefficient it calculates
 
 $$
-S_\beta=
-\frac{\mathrm{SD}(\hat{\beta}_t)}
-{\left|\mathrm{Mean}(\hat{\beta}_t)\right|}.
+S_\beta=\frac{\mathrm{SD}(\hat\beta_t)}{|\mathrm{Mean}(\hat\beta_t)|}.
 $$
 
 Lower values mean greater relative stability. The code describes values below `0.25` as stable, `0.25` to below `0.50` as somewhat stable, and at least `0.50` as unstable. A near-zero mean produces an infinite ratio. Pair-beta and market-beta stability are evaluated separately.
@@ -127,7 +125,7 @@ The current diagnostic and backtest are therefore separate calculations. The lat
 
 ## Entry and exit rules
 
-Entry requires the z-score threshold and all enabled tests. In the current code, filters are checked in this order: pair-only cointegration, residual stationarity, minimum $R^2$, and finite positive half-life when the holding rule is enabled. The daily output records the first failed rule.
+Entry requires the z-score threshold and all enabled tests. Filters are checked in this order: ADF residual stationarity, minimum $R^2$, and finite positive half-life when the holding rule is enabled. The daily output records the first failed rule.
 
 A position closes on the first applicable event:
 
@@ -213,14 +211,13 @@ Daily records include live diagnostics, signal and decision z-scores, entry bloc
 
 ## `good_pair` and quality score
 
-`good_pair=True` requires the enabled pair-only threshold, residual stationarity threshold, half-life range, pair-beta stability, market-beta stability, and minimum $R^2$. It does not require a current signal and does not use return, Sharpe ratio, win rate, or drawdown. It means the latest model passed structural filters—not that the strategy is profitable.
+`good_pair=True` requires the enabled ADF residual-stationarity threshold, half-life range, pair-beta stability, market-beta stability, and minimum $R^2$. It does not require a current signal and does not use return, Sharpe ratio, win rate, or drawdown. It means the latest model passed structural filters—not that the strategy is profitable.
 
 The quality score is a fixed heuristic from 0 to 100:
 
 | Component | Maximum points | Code behavior |
 | --- | ---: | --- |
-| Pair-only p-value | 25 | Linear improvement from threshold to zero |
-| Residual stationarity p-value | 25 | Linear improvement from threshold to zero |
+| Augmented Dickey–Fuller (ADF) p-value | 25 | Linear improvement from threshold to zero |
 | $R^2$ | 15 | `15 × R²`, clipped to 0–15 |
 | Pair-beta stability | 10 | Linear improvement from limit to zero |
 | Market-beta stability | 10 | Linear improvement from limit to zero |
@@ -229,15 +226,11 @@ The quality score is a fixed heuristic from 0 to 100:
 
 This score is not a probability, expected return, or statistically calibrated measure.
 
+The six components total 75 raw points. The implementation multiplies the result by `100 / 75`, preserving their relative weights while reporting a 0–100 score.
+
 ## Current-signal meaning
 
 The signal function returns `NO DATA` for a non-finite z-score and `NO TRADE` below the entry threshold. Otherwise it reports normalized long and short legs. A displayed trade direction means the z-score threshold was reached; it does not by itself guarantee that all `good_pair` filters passed.
-
-## Legacy pair-only filter
-
-The analyzer still calculates a pair-only cointegration p-value from the two asset log-price series. It can block daily entries, contributes to `good_pair`, and supplies 25 quality-score points. The actual tradable object is instead the three-leg market-adjusted residual.
-
-This legacy filter is overlapping evidence, not an independent test of the tradable residual. It can be disabled by setting `coint_threshold=None`. Removing it from the project requires coordinated changes to entry rules, summary fields, scoring, screener output columns, and command-line arguments.
 
 Pairs are sorted using eligibility, Sharpe ratio, quality score, and absolute current signal. If the same period is used for selection and reported performance, the result contains selection bias.
 

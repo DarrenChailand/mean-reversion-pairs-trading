@@ -426,7 +426,6 @@ def analyze_one_pair(
         stop_loss_fraction=args.stop_loss_fraction,
         relationship_break_r_squared=args.relationship_break_r_squared,
         relationship_break_beta_change=args.relationship_break_beta_change,
-        coint_threshold=args.coint_threshold,
         adf_threshold=args.adf_threshold,
         min_half_life=args.min_half_life,
         max_half_life=args.max_half_life,
@@ -551,7 +550,6 @@ def screen_pairs(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame]:
             "market_ticker",
             "good_pair",
             "quality_score",
-            "coint_pvalue",
             "adf_pvalue",
             "half_life",
             "spread_std",
@@ -709,7 +707,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exit if pair or market beta changes by more than this relative amount. Use 0 to disable.",
     )
 
-    parser.add_argument("--coint-threshold", type=float, default=0.05)
     parser.add_argument("--adf-threshold", type=float, default=0.05)
     parser.add_argument("--min-half-life", type=float, default=2.0)
     parser.add_argument("--max-half-life", type=float, default=60.0)

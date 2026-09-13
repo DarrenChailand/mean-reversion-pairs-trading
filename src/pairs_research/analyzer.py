@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import yfinance as yf
-from statsmodels.tsa.stattools import adfuller, coint
+from statsmodels.tsa.stattools import adfuller
 
 try:
     from statsmodels.regression.rolling import RollingOLS
@@ -49,8 +49,6 @@ class PairAnalysisResult:
     signal_date: pd.Timestamp
     rolling_betas: pd.DataFrame
     all_zscore: pd.Series
-    coint_statistic: float
-    coint_pvalue: float
     adf_statistic: float
     adf_pvalue: float
     beta_pair_stability_ratio: float
@@ -248,8 +246,6 @@ class PairTradingAnalyzer:
         y_train = log_train[self.config.stock2]
         m_train = log_train[self.config.market_ticker]
 
-        coint_statistic, coint_pvalue = self._cointegration_test(x_train, y_train)
-
         model = self._fit_market_adjusted_model(x_train, y_train, m_train)
         alpha = float(model.params["const"])
         beta_pair = float(model.params[self.config.stock2])
@@ -313,8 +309,6 @@ class PairTradingAnalyzer:
             signal_date=self.signal_date_actual,
             rolling_betas=rolling_betas,
             all_zscore=all_zscore,
-            coint_statistic=float(coint_statistic),
-            coint_pvalue=float(coint_pvalue),
             adf_statistic=float(adf_statistic),
             adf_pvalue=float(adf_pvalue),
             beta_pair_stability_ratio=float(beta_pair_stability_ratio),
@@ -384,18 +378,6 @@ class PairTradingAnalyzer:
         )
         X_train = sm.add_constant(X_train, has_constant="add")
         return sm.OLS(x_train, X_train).fit()
-
-    def _cointegration_test(self, x_train: pd.Series, y_train: pd.Series) -> tuple[float, float]:
-        self._log("\nCointegration Test Between Two Assets")
-        coint_score, coint_pvalue, _ = coint(x_train, y_train)
-        self._log("Cointegration statistic:", round(float(coint_score), 4))
-        self._log("Cointegration p-value:", float(coint_pvalue))
-        self._log("p-value scientific:", f"{float(coint_pvalue):.10e}")
-        if coint_pvalue < 0.05:
-            self._log("Interpretation: The two assets are likely cointegrated.")
-        else:
-            self._log("Interpretation: Weak/no evidence that the two assets are cointegrated.")
-        return float(coint_score), float(coint_pvalue)
 
     def _print_market_adjusted_model(
         self, model, alpha: float, beta_pair: float, beta_market: float
@@ -737,7 +719,6 @@ class PairBacktestConfig:
     stop_loss_fraction: float | None = 0.10
     relationship_break_r_squared: float | None = 0.60
     relationship_break_beta_change: float | None = 0.50
-    coint_threshold: float | None = 0.05
     adf_threshold: float | None = 0.05
     verbose: bool = False
 
@@ -840,7 +821,6 @@ def _validate_backtest_config(config: PairBacktestConfig) -> PairBacktestConfig:
         config.relationship_break_beta_change,
         "relationship_break_beta_change",
     )
-    config.coint_threshold = _optional_probability(config.coint_threshold, "coint_threshold")
     config.adf_threshold = _optional_probability(config.adf_threshold, "adf_threshold")
     return config
 
@@ -848,12 +828,7 @@ def _validate_backtest_config(config: PairBacktestConfig) -> PairBacktestConfig:
 def _fit_walk_forward_model(
     train_prices: pd.DataFrame, stock1: str, stock2: str, market_ticker: str
 ) -> dict[str, float]:
-    """Fit one market-adjusted model and its entry tests using training data only.
-
-    Cointegration is tested on the two pair log-price series. The ADF test is
-    run on the market-adjusted regression residual. Both use exactly the same
-    rolling training window and never include the signal date.
-    """
+    """Fit the market-adjusted model using training data only."""
     tickers = [stock1, stock2, market_ticker]
     logged = safe_log_price_frame(train_prices, tickers)
     stock1_log = logged[stock1]
@@ -881,20 +856,10 @@ def _fit_walk_forward_model(
     ss_total = float(np.sum(np.square(centred)))
     r_squared = float(1.0 - ss_res / ss_total) if ss_total > 0 else float("nan")
 
-    # Pair cointegration test: stock1 versus stock2 only, matching the latest
-    # pair-analysis test elsewhere in this file.
-    try:
-        coint_statistic, coint_pvalue, _ = coint(stock1_log, stock2_log)
-        coint_statistic = float(coint_statistic)
-        coint_pvalue = float(coint_pvalue)
-    except Exception:
-        coint_statistic = float("nan")
-        coint_pvalue = float("nan")
-
     # Stationarity test on the actual market-adjusted spread used for signals.
     residual_series = pd.Series(residual, index=logged.index, dtype=float)
     try:
-        adf_result = adfuller(residual_series.dropna(), result_object=False)
+        adf_result = adfuller(residual_series.dropna())
         adf_statistic = float(adf_result[0])
         adf_pvalue = float(adf_result[1])
     except Exception:
@@ -936,8 +901,6 @@ def _fit_walk_forward_model(
         "spread_mean": spread_mean,
         "spread_std": spread_std,
         "r_squared": r_squared,
-        "coint_statistic": coint_statistic,
-        "coint_pvalue": coint_pvalue,
         "adf_statistic": adf_statistic,
         "adf_pvalue": adf_pvalue,
         "half_life": half_life,
@@ -1025,8 +988,6 @@ def _model_from_signal_row(signal_row: pd.Series) -> dict[str, float]:
         "spread_mean": float(signal_row["spread_mean"]),
         "spread_std": float(signal_row["spread_std"]),
         "r_squared": float(signal_row["r_squared"]),
-        "coint_statistic": float(signal_row["coint_statistic"]),
-        "coint_pvalue": float(signal_row["coint_pvalue"]),
         "adf_statistic": float(signal_row["adf_statistic"]),
         "adf_pvalue": float(signal_row["adf_pvalue"]),
         "half_life": float(signal_row["half_life"]),
@@ -1043,11 +1004,6 @@ def _entry_block_reason(
     config: PairBacktestConfig,
 ) -> str | None:
     """Return why a fresh model may not open a trade, or None if eligible."""
-    if config.coint_threshold is not None:
-        pvalue = float(live_model.get("coint_pvalue", float("nan")))
-        if not np.isfinite(pvalue) or pvalue > float(config.coint_threshold):
-            return "ENTRY_COINTEGRATION"
-
     if config.adf_threshold is not None:
         pvalue = float(live_model.get("adf_pvalue", float("nan")))
         if not np.isfinite(pvalue) or pvalue > float(config.adf_threshold):
@@ -1148,8 +1104,6 @@ def _build_walk_forward_signals(prices: pd.DataFrame, config: PairBacktestConfig
                 "beta_pair": model["beta_pair"],
                 "beta_market": model["beta_market"],
                 "r_squared": model["r_squared"],
-                "coint_statistic": model["coint_statistic"],
-                "coint_pvalue": model["coint_pvalue"],
                 "adf_statistic": model["adf_statistic"],
                 "adf_pvalue": model["adf_pvalue"],
                 "half_life": model["half_life"],
@@ -1191,7 +1145,6 @@ def run_daily_walk_forward_backtest_from_prices(
     stop_loss_fraction: float | None = 0.10,
     relationship_break_r_squared: float | None = 0.60,
     relationship_break_beta_change: float | None = 0.50,
-    coint_threshold: float | None = 0.05,
     adf_threshold: float | None = 0.05,
     verbose: bool = False,
 ) -> PairBacktestResult:
@@ -1227,7 +1180,6 @@ def run_daily_walk_forward_backtest_from_prices(
             stop_loss_fraction=stop_loss_fraction,
             relationship_break_r_squared=relationship_break_r_squared,
             relationship_break_beta_change=relationship_break_beta_change,
-            coint_threshold=coint_threshold,
             adf_threshold=adf_threshold,
             verbose=verbose,
         )
@@ -1452,7 +1404,6 @@ def run_daily_walk_forward_backtest_from_prices(
                         "entry_spread_mean": live_model["spread_mean"],
                         "entry_spread_std": live_model["spread_std"],
                         "entry_r_squared": live_model["r_squared"],
-                        "entry_coint_pvalue": live_model["coint_pvalue"],
                         "entry_adf_pvalue": live_model["adf_pvalue"],
                         "entry_half_life": entry_half_life,
                         "max_holding_half_lives": config.max_holding_half_lives,
@@ -1479,9 +1430,6 @@ def run_daily_walk_forward_backtest_from_prices(
                 "signal_date": signal_date,
                 "live_signal_zscore": live_zscore,
                 "live_r_squared": float(live_model["r_squared"])
-                if live_model is not None
-                else float("nan"),
-                "live_coint_pvalue": float(live_model["coint_pvalue"])
                 if live_model is not None
                 else float("nan"),
                 "live_adf_pvalue": float(live_model["adf_pvalue"])
@@ -1580,7 +1528,6 @@ def run_daily_walk_forward_backtest_from_prices(
         "stop_loss_fraction": config.stop_loss_fraction,
         "relationship_break_r_squared": config.relationship_break_r_squared,
         "relationship_break_beta_change": config.relationship_break_beta_change,
-        "entry_coint_threshold": config.coint_threshold,
         "entry_adf_threshold": config.adf_threshold,
         "buy_transaction_cost": float(config.buy_transaction_cost),
         "sell_transaction_cost": float(config.sell_transaction_cost),
@@ -1610,9 +1557,6 @@ def run_daily_walk_forward_backtest_from_prices(
         "relationship_break_exits": int(
             sum(v for k, v in exit_counts.items() if k.startswith("RELATIONSHIP_"))
         ),
-        "cointegration_blocked_entry_days": int(
-            (daily["entry_block_reason"] == "ENTRY_COINTEGRATION").sum()
-        ),
         "adf_blocked_entry_days": int((daily["entry_block_reason"] == "ENTRY_ADF").sum()),
         "r_squared_blocked_entry_days": int(
             (daily["entry_block_reason"] == "ENTRY_R_SQUARED").sum()
@@ -1634,7 +1578,6 @@ def run_daily_walk_forward_backtest_from_prices(
         print("Sharpe ratio:", round(sharpe_ratio, 4) if np.isfinite(sharpe_ratio) else "N/A")
         print("Maximum drawdown:", round(max_drawdown, 4))
         print("Completed trades:", len(trades))
-        print("Cointegration-blocked entry days:", metrics["cointegration_blocked_entry_days"])
         print("ADF-blocked entry days:", metrics["adf_blocked_entry_days"])
         print("R-squared-blocked entry days:", metrics["r_squared_blocked_entry_days"])
         print("Half-life-blocked entry days:", metrics["half_life_blocked_entry_days"])
@@ -1681,31 +1624,20 @@ def current_trade_signal(
 
 
 def pair_quality_score(
-    coint_pvalue: float,
     adf_pvalue: float,
     r_squared: float,
     beta_stability_ratio: float,
     market_beta_stability_ratio: float,
     half_life: float,
     signal_zscore: float,
-    coint_threshold: float | None = 0.05,
     adf_threshold: float | None = 0.05,
     max_beta_stability: float = 0.50,
     min_half_life: float = 2.0,
     max_half_life: float = 60.0,
     entry_zscore: float = 2.0,
 ) -> float:
-    """Score both pair and market hedge stability on a 0-100 scale."""
+    """Score residual quality and hedge stability on a 0-100 scale."""
     score = 0.0
-    if (
-        coint_threshold is not None
-        and np.isfinite(coint_pvalue)
-        and coint_pvalue <= coint_threshold
-    ):
-        if coint_threshold > 0:
-            score += max(0.0, 25.0 * (1.0 - coint_pvalue / coint_threshold))
-        elif coint_pvalue <= 0:
-            score += 25.0
     if adf_threshold is not None and np.isfinite(adf_pvalue) and adf_pvalue <= adf_threshold:
         if adf_threshold > 0:
             score += max(0.0, 25.0 * (1.0 - adf_pvalue / adf_threshold))
@@ -1724,7 +1656,9 @@ def pair_quality_score(
         score += 10.0
     if np.isfinite(signal_zscore) and abs(signal_zscore) >= entry_zscore:
         score += 5.0
-    return round(float(score), 4)
+    # The remaining components total 75 raw points. Rescaling preserves their
+    # relative weights while keeping the public score on a 0-100 scale.
+    return round(float(score * (100.0 / 75.0)), 4)
 
 
 def analyze_pair_strategy_from_prices(
@@ -1751,7 +1685,6 @@ def analyze_pair_strategy_from_prices(
     stop_loss_fraction: float | None = 0.10,
     relationship_break_r_squared: float | None = 0.60,
     relationship_break_beta_change: float | None = 0.50,
-    coint_threshold: float | None = 0.05,
     adf_threshold: float | None = 0.05,
     min_half_life: float = 2.0,
     max_half_life: float = 60.0,
@@ -1824,15 +1757,10 @@ def analyze_pair_strategy_from_prices(
         stop_loss_fraction=stop_loss_fraction,
         relationship_break_r_squared=relationship_break_r_squared,
         relationship_break_beta_change=relationship_break_beta_change,
-        coint_threshold=coint_threshold,
         adf_threshold=adf_threshold,
         verbose=verbose,
     )
 
-    passes_cointegration = bool(
-        coint_threshold is None
-        or (np.isfinite(analysis.coint_pvalue) and analysis.coint_pvalue <= coint_threshold)
-    )
     passes_adf = bool(
         adf_threshold is None
         or (np.isfinite(analysis.adf_pvalue) and analysis.adf_pvalue <= adf_threshold)
@@ -1850,22 +1778,19 @@ def analyze_pair_strategy_from_prices(
     )
     passes_r_squared = bool(np.isfinite(analysis.r_squared) and analysis.r_squared >= min_r_squared)
     good_pair = bool(
-        passes_cointegration
-        and passes_adf
+        passes_adf
         and passes_half_life
         and passes_beta_stability
         and passes_market_beta_stability
         and passes_r_squared
     )
     quality_score = pair_quality_score(
-        analysis.coint_pvalue,
         analysis.adf_pvalue,
         analysis.r_squared,
         analysis.beta_pair_stability_ratio,
         analysis.beta_market_stability_ratio,
         analysis.half_life,
         analysis.signal_zscore,
-        coint_threshold=coint_threshold,
         adf_threshold=adf_threshold,
         max_beta_stability=max_beta_stability,
         min_half_life=min_half_life,
@@ -1909,13 +1834,10 @@ def analyze_pair_strategy_from_prices(
         "signal_stock1_weight": float(signal_weights[0]),
         "signal_stock2_weight": float(signal_weights[1]),
         "signal_market_weight": float(signal_weights[2]),
-        "coint_statistic": float(analysis.coint_statistic),
-        "coint_pvalue": float(analysis.coint_pvalue),
         "adf_statistic": float(analysis.adf_statistic),
         "adf_pvalue": float(analysis.adf_pvalue),
         "beta_pair_stability_ratio": float(analysis.beta_pair_stability_ratio),
         "beta_market_stability_ratio": float(analysis.beta_market_stability_ratio),
-        "passes_cointegration": passes_cointegration,
         "passes_adf": passes_adf,
         "passes_half_life": passes_half_life,
         "passes_beta_stability": passes_beta_stability,
@@ -2166,10 +2088,6 @@ def main() -> None:
         input("Relationship-break maximum beta change (press Enter = 0.50, type off to disable): "),
         0.50,
     )
-    coint_threshold = _parse_optional_number(
-        input("Maximum entry cointegration p-value (press Enter = 0.05, type off to disable): "),
-        0.05,
-    )
     adf_threshold = _parse_optional_number(
         input("Maximum entry ADF p-value (press Enter = 0.05, type off to disable): "),
         0.05,
@@ -2200,7 +2118,6 @@ def main() -> None:
         stop_loss_fraction=stop_loss,
         relationship_break_r_squared=relationship_r2,
         relationship_break_beta_change=relationship_beta,
-        coint_threshold=coint_threshold,
         adf_threshold=adf_threshold,
         verbose=True,
     )
@@ -2219,7 +2136,6 @@ def main() -> None:
             "exit_date",
             "direction",
             "entry_zscore",
-            "entry_coint_pvalue",
             "entry_adf_pvalue",
             "entry_r_squared",
             "entry_half_life",

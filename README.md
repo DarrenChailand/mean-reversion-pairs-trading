@@ -8,7 +8,7 @@ A walk-forward research framework for screening and backtesting market-neutral p
 
 - Market-adjusted three-leg spread model
 - Rolling, prior-data-only model estimation
-- Cointegration and augmented Dickey–Fuller entry filters
+- Augmented Dickey–Fuller residual-stationarity entry filter
 - Transaction costs, drifting weights, stop losses, and time stops
 - Relationship-break exits based on fit and hedge-ratio changes
 - Shared price downloads for efficient universe screening
