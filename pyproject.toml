@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-pairs-research"
+version = "0.1.0"
+description = "Walk-forward research framework for market-neutral pairs trading"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Darren Chailand" }]
+dependencies = [
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "statsmodels>=0.14",
+  "yfinance>=0.2.40",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+pairs-analyze = "pairs_research.analyzer:main"
+pairs-screen-crypto = "pairs_research.screeners.crypto:main"
+pairs-screen-ihsg-banks = "pairs_research.screeners.ihsg_banks:main"
+pairs-screen-sp500 = "pairs_research.screeners.sp500:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
