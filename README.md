@@ -43,7 +43,7 @@ quant-pairs-research/
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/quant-pairs-research.git
+git clone https://github.com/DarrenChailand/quant-pairs-research.git
 cd quant-pairs-research
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
